@@ -56,7 +56,7 @@ export default class Refrigerator extends baseDevice {
     }
 
     this.serviceShabbatMode = accessory.getService('Shabbat Mode');
-    if (this.config.ref_express_freezer && 'sabbathMode' in device.snapshot?.refState) {
+    if (this.config.ref_shabbat_mode && 'sabbathMode' in device.snapshot?.refState) {
       if (!this.serviceShabbatMode) {
         this.serviceShabbatMode = accessory.addService(Switch, 'Shabbat Mode', 'Shabbat Mode');
         this.serviceShabbatMode.addOptionalCharacteristic(Characteristic.ConfiguredName);
