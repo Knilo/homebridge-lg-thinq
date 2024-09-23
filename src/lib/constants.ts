@@ -20,6 +20,7 @@ export enum DeviceType {
   WASHER = 201,
   WASHER_NEW = 221,
   WASH_TOWER = 222,
+  WASH_TOWER_2 = 223,
   DRYER = 202,
   STYLER = 203,
   DISHWASHER = 204,
@@ -48,4 +49,5 @@ export enum DeviceType {
   PURICARE_AIR_DETECTOR = 4004,
   V2PHONE = 6001,
   HOMEROBOT = 9000,
+  AERO_TOWER = 410,
 }

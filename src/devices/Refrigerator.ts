@@ -3,20 +3,21 @@ import {CharacteristicValue, PlatformAccessory} from 'homebridge';
 import {Device} from '../lib/Device';
 import {baseDevice} from '../baseDevice';
 import {DeviceModel} from '../lib/DeviceModel';
-import {PlatformType} from "../lib/constants";
+import {cToF, fToC} from '../helper';
 
 export default class Refrigerator extends baseDevice {
-  protected serviceLabel;
   protected serviceFreezer;
   protected serviceFridge;
   protected serviceDoorOpened;
   protected serviceExpressMode;
+  protected serviceShabbatMode;
   protected serviceExpressFridge;
   protected serviceEcoFriendly;
+  protected serviceWaterFilter;
 
   constructor(
-    protected readonly platform: LGThinQHomebridgePlatform,
-    protected readonly accessory: PlatformAccessory,
+    public readonly platform: LGThinQHomebridgePlatform,
+    public readonly accessory: PlatformAccessory,
   ) {
     super(platform, accessory);
 
@@ -25,56 +26,100 @@ export default class Refrigerator extends baseDevice {
         ContactSensor,
         Switch,
         ServiceLabel,
+        FilterMaintenance,
       },
       Characteristic,
     } = this.platform;
     const device: Device = accessory.context.device;
 
-    this.serviceLabel = accessory.getService(ServiceLabel) || accessory.addService(ServiceLabel, device.name);
-    this.serviceLabel.setCharacteristic(Characteristic.ServiceLabelNamespace, Characteristic.ServiceLabelNamespace.DOTS);
+    const serviceLabel = accessory.getService(ServiceLabel);
+    if (serviceLabel) {
+      accessory.removeService(serviceLabel);
+    }
 
     this.serviceFridge = this.createThermostat('Fridge', 'fridgeTemp');
     if (this.serviceFridge) {
       this.serviceFridge.updateCharacteristic(Characteristic.TargetTemperature, this.Status.fridgeTemperature);
-      this.serviceFridge.addLinkedService(this.serviceLabel);
     }
 
     this.serviceFreezer = this.createThermostat('Freezer', 'freezerTemp');
     if (this.serviceFreezer) {
       this.serviceFreezer.updateCharacteristic(Characteristic.TargetTemperature, this.Status.freezerTemperature);
-      this.serviceFreezer.addLinkedService(this.serviceLabel);
     }
 
     // Door open state
-    this.serviceDoorOpened = accessory.getService(ContactSensor) || accessory.addService(ContactSensor, 'Refrigerator Door Closed');
-    this.serviceDoorOpened.addLinkedService(this.serviceLabel);
+    this.serviceDoorOpened = accessory.getService(ContactSensor);
+    if (!this.serviceDoorOpened) {
+      this.serviceDoorOpened = accessory.addService(ContactSensor, 'Refrigerator Door Closed');
+      this.serviceDoorOpened.addOptionalCharacteristic(Characteristic.ConfiguredName);
+      this.serviceDoorOpened.updateCharacteristic(Characteristic.ConfiguredName, 'Refrigerator Door Closed');
+    }
+
+    this.serviceShabbatMode = accessory.getService('Shabbat Mode');
+    if (this.config.ref_express_freezer && 'sabbathMode' in device.snapshot?.refState) {
+      if (!this.serviceShabbatMode) {
+        this.serviceShabbatMode = accessory.addService(Switch, 'Shabbat Mode', 'Shabbat Mode');
+        this.serviceShabbatMode.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceShabbatMode.updateCharacteristic(Characteristic.ConfiguredName, 'Shabbat Mode');
+      }
+
+      this.serviceShabbatMode.getCharacteristic(Characteristic.On).onSet(this.setShabbatMode.bind(this));
+    } else if (this.serviceShabbatMode) {
+      accessory.removeService(this.serviceShabbatMode);
+      this.serviceShabbatMode = null;
+    }
 
     this.serviceExpressMode = accessory.getService('Express Freezer');
     if (this.config.ref_express_freezer && 'expressMode' in device.snapshot?.refState) {
-      this.serviceExpressMode = this.serviceExpressMode || accessory.addService(Switch, 'Express Freezer', 'Express Freezer');
+      if (!this.serviceExpressMode) {
+        this.serviceExpressMode = accessory.addService(Switch, 'Express Freezer', 'Express Freezer');
+        this.serviceExpressMode.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceExpressMode.updateCharacteristic(Characteristic.ConfiguredName, 'Express Freezer');
+      }
+
       this.serviceExpressMode.getCharacteristic(Characteristic.On).onSet(this.setExpressMode.bind(this));
-      this.serviceExpressMode.addLinkedService(this.serviceLabel);
     } else if (this.serviceExpressMode) {
-      accessory.getService(this.serviceExpressMode);
+      accessory.removeService(this.serviceExpressMode);
+      this.serviceExpressMode = null;
     }
 
     this.serviceExpressFridge = accessory.getService('Express Fridge');
     if (this.config.ref_express_fridge && 'expressFridge' in device.snapshot?.refState) {
-      // eslint-disable-next-line max-len
-      this.serviceExpressFridge = this.serviceExpressFridge || accessory.addService(Switch, 'Express Fridge', 'Express Fridge');
+      if (!this.serviceExpressFridge) {
+        this.serviceExpressFridge = accessory.addService(Switch, 'Express Fridge', 'Express Fridge');
+        this.serviceExpressFridge.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceExpressFridge.updateCharacteristic(Characteristic.ConfiguredName, 'Express Fridge');
+      }
+
       this.serviceExpressFridge.getCharacteristic(Characteristic.On).onSet(this.setExpressFridge.bind(this));
-      this.serviceExpressFridge.addLinkedService(this.serviceLabel);
     } else if (this.serviceExpressFridge) {
-      accessory.getService(this.serviceExpressFridge);
+      accessory.removeService(this.serviceExpressFridge);
+      this.serviceExpressFridge = null;
     }
 
     this.serviceEcoFriendly = accessory.getService('Eco Friendly');
     if (this.config.ref_eco_friendly && 'ecoFriendly' in device.snapshot?.refState) {
-      this.serviceEcoFriendly = this.serviceEcoFriendly || accessory.addService(Switch, 'Eco Friendly', 'Eco Friendly');
+      if (!this.serviceEcoFriendly) {
+        this.serviceEcoFriendly = accessory.addService(Switch, 'Eco Friendly', 'Eco Friendly');
+        this.serviceEcoFriendly.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceEcoFriendly.updateCharacteristic(Characteristic.ConfiguredName, 'Eco Friendly');
+      }
+
       this.serviceEcoFriendly.getCharacteristic(Characteristic.On).onSet(this.setEcoFriendly.bind(this));
-      this.serviceEcoFriendly.addLinkedService(this.serviceLabel);
     } else if (this.serviceEcoFriendly) {
-      accessory.getService(this.serviceEcoFriendly);
+      accessory.removeService(this.serviceEcoFriendly);
+      this.serviceEcoFriendly = null;
+    }
+
+    if (this.Status.hasFeature('waterFilter')) {
+      this.serviceWaterFilter = accessory.getService('Water Filter Maintenance');
+      if (!this.serviceWaterFilter) {
+        this.serviceWaterFilter = accessory.addService(FilterMaintenance, 'Water Filter Maintenance', 'Water Filter Maintenance');
+        this.serviceWaterFilter.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceWaterFilter.updateCharacteristic(Characteristic.ConfiguredName, 'Water Filter Maintenance');
+      }
+
+      this.serviceWaterFilter.updateCharacteristic(Characteristic.Name, 'Water Filter Maintenance');
     }
   }
 
@@ -83,6 +128,7 @@ export default class Refrigerator extends baseDevice {
       ref_express_freezer: false,
       ref_express_fridge: false,
       ref_eco_friendly: false,
+      ref_shabbat_mode: false,
     }, super.config);
   }
 
@@ -96,7 +142,13 @@ export default class Refrigerator extends baseDevice {
   public updateAccessoryCharacteristic(device: Device) {
     super.updateAccessoryCharacteristic(device);
 
-    const {Characteristic} = this.platform;
+    const {
+      Characteristic,
+      Characteristic: {
+        FilterLifeLevel,
+        FilterChangeIndication,
+      },
+    } = this.platform;
 
     const tempBetween = (props, value) => {
       return Math.min(Math.max(props.minValue, value), props.maxValue);
@@ -114,20 +166,33 @@ export default class Refrigerator extends baseDevice {
       this.serviceFridge.updateCharacteristic(Characteristic.TargetTemperature, t);
     }
 
-    const contactSensorValue = this.Status.isDoorClosed ?
-      Characteristic.ContactSensorState.CONTACT_DETECTED : Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
-    this.serviceDoorOpened.updateCharacteristic(Characteristic.ContactSensorState, contactSensorValue);
+    if (this.serviceDoorOpened) {
+      const contactSensorValue = this.Status.isDoorClosed ?
+        Characteristic.ContactSensorState.CONTACT_DETECTED : Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
+      this.serviceDoorOpened.updateCharacteristic(Characteristic.ContactSensorState, contactSensorValue);
+    }
 
-    if (this.config.ref_express_freezer && 'expressMode' in device.snapshot?.refState) {
+    if (this.config.ref_express_freezer && 'expressMode' in device.snapshot?.refState && this.serviceExpressMode) {
       this.serviceExpressMode.updateCharacteristic(Characteristic.On, this.Status.isExpressModeOn);
     }
 
-    if (this.config.ref_express_fridge && 'expressFridge' in device.snapshot?.refState) {
+    if (this.config.ref_shabbat_mode && 'sabbatMode' in device.snapshot?.refState && this.serviceShabbatMode) {
+      this.serviceShabbatMode.updateCharacteristic(Characteristic.On, this.Status.isShabbatModeOn);
+    }
+
+
+    if (this.config.ref_express_fridge && 'expressFridge' in device.snapshot?.refState && this.serviceExpressFridge) {
       this.serviceExpressFridge.updateCharacteristic(Characteristic.On, this.Status.isExpressFridgeOn);
     }
 
-    if (this.config.ref_eco_friendly && 'ecoFriendly' in device.snapshot?.refState) {
+    if (this.config.ref_eco_friendly && 'ecoFriendly' in device.snapshot?.refState && this.serviceEcoFriendly) {
       this.serviceEcoFriendly.updateCharacteristic(Characteristic.On, this.Status.isEcoFriendlyOn);
+    }
+
+    if (this.Status.hasFeature('waterFilter') && this.serviceWaterFilter) {
+      this.serviceWaterFilter.updateCharacteristic(FilterLifeLevel, this.Status.waterFilterRemain);
+      this.serviceWaterFilter.updateCharacteristic(FilterChangeIndication,
+        this.Status.waterFilterRemain < 5 ? FilterChangeIndication.CHANGE_FILTER : FilterChangeIndication.FILTER_OK);
     }
   }
 
@@ -141,6 +206,24 @@ export default class Refrigerator extends baseDevice {
       dataSetList: {
         refState: {
           expressMode: value as boolean ? On : Off,
+          tempUnit: this.Status.tempUnit,
+        },
+      },
+      dataGetList: null,
+    });
+    this.platform.log.debug('Set Express Freezer ->', value);
+  }
+
+  async setShabbatMode(value: CharacteristicValue) {
+    const device: Device = this.accessory.context.device;
+    const On = device.deviceModel.lookupMonitorName('sabbathMode', '@CP_ON_EN_W');
+    const Off = device.deviceModel.lookupMonitorName('sabbathMode', '@CP_OFF_EN_W');
+    this.platform.ThinQ?.deviceControl(device.id, {
+      dataKey: null,
+      dataValue: null,
+      dataSetList: {
+        refState: {
+          sabbatMode: value as boolean ? On : Off,
           tempUnit: this.Status.tempUnit,
         },
       },
@@ -199,23 +282,28 @@ export default class Refrigerator extends baseDevice {
    */
   protected createThermostat(name: string, key: string) {
     const device: Device = this.accessory.context.device;
-    const visibleItem = device.deviceModel.data.Config?.visibleItems?.find(item => item.Feature === key || item.feature === key);
-    if (visibleItem && (visibleItem.ControlTitle === undefined && visibleItem.controlTitle === undefined)) {
+    if (!this.Status.hasFeature(key)) {
       return;
     }
 
     const {Characteristic} = this.platform;
     const isCelsius = this.Status.tempUnit === 'CELSIUS';
-    const service = this.accessory.getService(name) || this.accessory.addService(this.platform.Service.Thermostat, name, name);
+
+    let service = this.accessory.getService(name);
+    if (!service) {
+      service = this.accessory.addService(this.platform.Service.Thermostat, name, name);
+      service.addOptionalCharacteristic(Characteristic.ConfiguredName);
+      service.updateCharacteristic(Characteristic.ConfiguredName, name);
+    }
 
     // cool only
-    service.setCharacteristic(Characteristic.CurrentHeatingCoolingState, Characteristic.CurrentHeatingCoolingState.COOL);
+    service.updateCharacteristic(Characteristic.CurrentHeatingCoolingState, Characteristic.CurrentHeatingCoolingState.COOL);
     service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+      .updateValue(Characteristic.TargetHeatingCoolingState.COOL)
       .setProps({
         minValue: Characteristic.TargetHeatingCoolingState.COOL,
         maxValue: Characteristic.TargetHeatingCoolingState.COOL,
       });
-    service.setCharacteristic(Characteristic.TargetHeatingCoolingState, Characteristic.TargetHeatingCoolingState.COOL);
 
     service.getCharacteristic(Characteristic.TemperatureDisplayUnits).setProps({
       minValue: Characteristic.TemperatureDisplayUnits.CELSIUS,
@@ -236,6 +324,7 @@ export default class Refrigerator extends baseDevice {
       });
 
     service.getCharacteristic(Characteristic.TargetTemperature)
+      .updateValue(Math.min(...values))
       .onSet(async (value: CharacteristicValue) => { // value in celsius
         let indexValue;
         if (this.Status.tempUnit === 'FAHRENHEIT') {
@@ -301,6 +390,11 @@ export class RefrigeratorStatus {
     return this.data?.expressMode === this.deviceModel.lookupMonitorName('expressMode', '@CP_ON_EN_W');
   }
 
+  public get isShabbatModeOn() {
+    return this.data?.sabbathMode === this.deviceModel.lookupMonitorName('sabbatMode', '@CP_ON_EN_W');
+  }
+
+
   public get isExpressFridgeOn() {
     return this.data?.expressFridge === this.deviceModel.lookupMonitorName('expressFridge', '@CP_ON_EN_W');
   }
@@ -312,12 +406,32 @@ export class RefrigeratorStatus {
   public get tempUnit() {
     return this.data?.tempUnit || 'CELSIUS';
   }
-}
 
-export function fToC(fahrenheit) {
-  return parseFloat(((fahrenheit - 32) * 5 / 9).toFixed(1));
-}
+  public get waterFilterRemain() {
+    if ('waterFilter1RemainP' in this.data) {
+      return this.data?.waterFilter1RemainP || 0;
+    }
 
-export function cToF(celsius) {
-  return Math.round(celsius * 9 / 5 + 32);
+    if ('waterFilter' in this.data) {
+      const usedInMonth = parseInt(this.data?.waterFilter.match(/(\d)_/)[1]);
+      if (isNaN(usedInMonth)) {
+        return 0;
+      }
+
+      return (12 - usedInMonth) / 12 * 100;
+    }
+
+    return this.data?.waterFilter1RemainP || 0;
+  }
+
+  public hasFeature(key: string) {
+    const visibleItem = this.deviceModel.data.Config?.visibleItems?.find(item => item.Feature === key || item.feature === key);
+    if (!visibleItem) {
+      return false;
+    } else if (visibleItem.ControlTitle === undefined && visibleItem.controlTitle === undefined) {
+      return false;
+    }
+
+    return true;
+  }
 }

@@ -13,13 +13,17 @@ export default function AirState(deviceModel: DeviceModel, decodedMonitor) {
   const airState = {
     'airState.opMode': parseInt(decodedMonitor['OpMode'] || '0') as number,
     'airState.operation': loopupEnum(deviceModel, decodedMonitor, 'Operation') !== ACOperation.OFF,
-    'airState.tempState.current': parseInt(decodedMonitor['TempCur'] || '0') as number,
-    'airState.tempState.target': parseInt(decodedMonitor['TempCfg'] || '0') as number,
+    'airState.tempState.current': parseFloat(decodedMonitor['TempCur'] || '0') as number,
+    'airState.tempState.target': parseFloat(decodedMonitor['TempCfg'] || '0') as number,
     'airState.windStrength': parseInt(decodedMonitor['WindStrength'] || '0') as number,
     'airState.wDir.vStep': parseInt(decodedMonitor['WDirVStep'] || '0') as number,
     'airState.wDir.hStep': parseInt(decodedMonitor['WDirHStep'] || '0') as number,
     'airState.circulate.rotate': parseInt(decodedMonitor['CirculateDir']),
     'airState.lightingState.signal': parseInt(decodedMonitor['SignalLighting']),
+    'airState.quality.overall': 0,
+    'airState.quality.sensorMon': 0,
+    'airState.quality.PM1': 0,
+    'airState.energy.onCurrent': 0,
   };
 
   if (deviceModel.value('TempCur')) {
@@ -54,6 +58,10 @@ export default function AirState(deviceModel: DeviceModel, decodedMonitor) {
 
   if (decodedMonitor['Jet']) {
     airState['airState.wMode.jet'] = parseInt(decodedMonitor['Jet']);
+  }
+
+  if (decodedMonitor['SensorHumidity']) {
+    airState['airState.humidity.current'] = parseInt(decodedMonitor['SensorHumidity']);
   }
 
   return airState;

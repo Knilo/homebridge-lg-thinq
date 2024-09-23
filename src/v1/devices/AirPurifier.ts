@@ -1,8 +1,16 @@
 import {default as V2, RotateSpeed} from '../../devices/AirPurifier';
-import {CharacteristicValue} from 'homebridge';
+import {CharacteristicValue, PlatformAccessory} from 'homebridge';
 import {Device} from '../../lib/Device';
+import {LGThinQHomebridgePlatform} from '../../platform';
 
-export default class AirPurifier extends V2{
+export default class AirPurifier extends V2 {
+  constructor(
+    public readonly platform: LGThinQHomebridgePlatform,
+    public readonly accessory: PlatformAccessory,
+  ) {
+    super(platform, accessory);
+  }
+
   async setActive(value: CharacteristicValue) {
     const device: Device = this.accessory.context.device;
     await this.platform.ThinQ?.thinq1DeviceControl(device, 'Operation', value as boolean ? '1' : '0');
@@ -44,5 +52,14 @@ export default class AirPurifier extends V2{
 
     const device: Device = this.accessory.context.device;
     await this.platform.ThinQ?.thinq1DeviceControl(device, 'SignalLighting', value as boolean ? '1' : '0');
+  }
+
+  async setAirFastActive(value: CharacteristicValue) {
+    if (!this.Status.isPowerOn) {
+      return;
+    }
+
+    const device: Device = this.accessory.context.device;
+    await this.platform.ThinQ?.thinq1DeviceControl(device, 'AirFast', value as boolean ? '1' : '0');
   }
 }

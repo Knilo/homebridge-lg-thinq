@@ -7,6 +7,7 @@ import {EventEmitter} from 'events';
 import {PlatformType} from './lib/constants';
 import {ManualProcessNeeded, NotConnectedError} from './errors';
 import {Device} from './lib/Device';
+import Characteristics from './characteristics';
 
 /**
  * HomebridgePlatform
@@ -16,6 +17,8 @@ import {Device} from './lib/Device';
 export class LGThinQHomebridgePlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
   public readonly Characteristic: typeof Characteristic = this.api.hap.Characteristic;
+
+  public readonly customCharacteristics: ReturnType<typeof Characteristics> = Characteristics(this.api.hap.Characteristic);
 
   // this is used to track restored cached accessories
   public readonly accessories: PlatformAccessory[] = [];
@@ -104,15 +107,16 @@ export class LGThinQHomebridgePlatform implements DynamicPlatformPlugin {
     }
 
     for (const device of devices) {
+      this.log.debug('Device ['+device.name+']: ', device.toString());
+      this.log.debug(JSON.stringify(device.data));
+
       if (!this.enable_thinq1 && device.platform === PlatformType.ThinQ1) {
         this.log.debug('Thinq1 device is skipped: ', device.toString());
         continue;
       }
 
-      this.log.debug('Device data: ', JSON.stringify(device.data));
-
       if (this.config.devices.length && !this.config.devices.find(enabled => enabled.id === device.id)) {
-        this.log.debug('Device skipped: ', device.id);
+        this.log.info('Device skipped: ', device.id);
         continue;
       }
 
@@ -126,7 +130,7 @@ export class LGThinQHomebridgePlatform implements DynamicPlatformPlugin {
 
       const accessoryType = Helper.make(device);
       if (accessoryType === null) {
-        this.log.info('Device not supported: ' + device.toString());
+        this.log.info('Device not supported: '+ device.platform + ': ' + device.toString());
         this.ThinQ.unregister(device).then(() => {
           this.log.debug(device.id, '- unregistered!');
         });
@@ -154,6 +158,7 @@ export class LGThinQHomebridgePlatform implements DynamicPlatformPlugin {
 
         // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+
         this.accessories.push(accessory);
       }
 
@@ -182,34 +187,15 @@ export class LGThinQHomebridgePlatform implements DynamicPlatformPlugin {
       setInterval(() => {
         this.ThinQ.devices().then((devices) => {
           devices.filter(device => device.platform === PlatformType.ThinQ2).forEach(device => {
-            // only emit if device online
-            if (device.snapshot.online) {
-              this.events.emit('refresh.'+device.id, device.snapshot);
-            }
+            this.events.emit(device.id, device.snapshot);
           });
         });
-      }, 600000); // every 10 minute
-
-      const refreshList = {};
-
-      thinq2devices.forEach(accessory => {
-        const device: Device = accessory.context.device;
-        refreshList[device.id] = setTimeout(() => {
-          this.events.once('refresh.'+device.id, (snapshot) => {
-            this.events.emit(device.id, snapshot);
-            refreshList[device.id].refresh();
-          });
-        }, 300000);
-      });
+      }, this.intervalTime); // every interval minute - backup method if mqtt not working
 
       this.log.info('Start MQTT listener for thinq2 device');
       await this.ThinQ.registerMQTTListener((data) => {
         if ('data' in data && 'deviceId' in data) {
           this.events.emit(data.deviceId, data.data?.state?.reported);
-
-          if (data.deviceId in refreshList) {
-            refreshList[data.deviceId].refresh();
-          }
         }
       });
     }

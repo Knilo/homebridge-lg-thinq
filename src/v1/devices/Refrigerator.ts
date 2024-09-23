@@ -1,8 +1,10 @@
-import {default as RefrigeratorV2, RefrigeratorStatus, fToC, cToF} from '../../devices/Refrigerator';
+import {default as RefrigeratorV2, RefrigeratorStatus} from '../../devices/Refrigerator';
 import {CharacteristicValue} from 'homebridge';
 import {Device} from '../../lib/Device';
+import {fToC} from '../../helper';
 
 export default class Refrigerator extends RefrigeratorV2 {
+
   protected createThermostat(name: string, key: string) {
     const keyMap = {
       fridgeTemp: 'TempRefrigerator',

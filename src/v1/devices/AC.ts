@@ -34,6 +34,18 @@ export default class AC extends AirConditioner {
       });
   }
 
+  async setFanState(value: CharacteristicValue) {
+    if (!this.Status.isPowerOn) {
+      return;
+    }
+
+    const device: Device = this.accessory.context.device;
+    const { TargetFanState } = this.platform.Characteristic;
+
+    const windStrength = value === TargetFanState.AUTO ? 8 : FanSpeed.HIGH; // 8 mean fan auto mode
+    this.platform.ThinQ?.thinq1DeviceControl(device, 'WindStrength', windStrength);
+  }
+
   async setJetModeActive(value: CharacteristicValue) {
     const device: Device = this.accessory.context.device;
 
@@ -70,7 +82,7 @@ export default class AC extends AirConditioner {
 
     const speedValue = Math.max(1, Math.round(value as number));
     const device: Device = this.accessory.context.device;
-    const windStrength = Object.keys(FanSpeed)[speedValue - 1] || FanSpeed.HIGH;
+    const windStrength = parseInt(Object.keys(FanSpeed)[speedValue - 1]) || FanSpeed.HIGH;
 
     this.platform.ThinQ?.thinq1DeviceControl(device, 'WindStrength', windStrength);
   }
@@ -103,5 +115,10 @@ export default class AC extends AirConditioner {
     device.data.snapshot['airState.opMode'] = opMode;
 
     this.updateAccessoryCharacteristic(device);
+  }
+
+  async setLight(value: CharacteristicValue) {
+    const device: Device = this.accessory.context.device;
+    await this.platform.ThinQ?.thinq1DeviceControl(device, 'DisplayControl', value ? '1' : '0');
   }
 }

@@ -6,17 +6,20 @@ import {PlatformType} from '../lib/constants';
 import {DeviceModel} from '../lib/DeviceModel';
 
 export const NOT_RUNNING_STATUS = ['COOLDOWN', 'POWEROFF', 'POWERFAIL', 'INITIAL', 'PAUSE', 'AUDIBLE_DIAGNOSIS', 'FIRMWARE',
-  'COURSE_DOWNLOAD', 'ERROR'];
+  'COURSE_DOWNLOAD', 'ERROR', 'END'];
 
 export default class WasherDryer extends baseDevice {
   public isRunning = false;
+  public isServiceTubCleanMaintenanceTriggered = false;
+
   protected serviceWasherDryer;
   protected serviceEventFinished;
   protected serviceDoorLock;
+  protected serviceTubCleanMaintenance;
 
   constructor(
-    protected readonly platform: LGThinQHomebridgePlatform,
-    protected readonly accessory: PlatformAccessory,
+    public readonly platform: LGThinQHomebridgePlatform,
+    public readonly accessory: PlatformAccessory,
   ) {
     super(platform, accessory);
 
@@ -34,15 +37,15 @@ export default class WasherDryer extends baseDevice {
 
     const device: Device = accessory.context.device;
 
-    this.serviceWasherDryer = accessory.getService(Valve) || accessory.addService(Valve, device.name);
+    this.serviceWasherDryer = accessory.getService(Valve);
+    if (!this.serviceWasherDryer) {
+      this.serviceWasherDryer = accessory.addService(Valve, device.name, device.name);
+      this.serviceWasherDryer.addOptionalCharacteristic(Characteristic.ConfiguredName);
+      this.serviceWasherDryer.updateCharacteristic(Characteristic.ConfiguredName, device.name);
+    }
+
     this.serviceWasherDryer.getCharacteristic(Characteristic.Active)
       .onSet(this.setActive.bind(this))
-      .setProps({
-        perms: [
-          Perms.PAIRED_READ,
-          Perms.NOTIFY,
-        ],
-      })
       .updateValue(Characteristic.Active.INACTIVE);
     this.serviceWasherDryer.setCharacteristic(Characteristic.Name, device.name);
     this.serviceWasherDryer.setCharacteristic(Characteristic.ValveType, Characteristic.ValveType.WATER_FAUCET);
@@ -54,30 +57,62 @@ export default class WasherDryer extends baseDevice {
     // only thinq2 support door lock status
     this.serviceDoorLock = accessory.getService(LockMechanism);
     if (this.config.washer_door_lock && device.platform === PlatformType.ThinQ2 && 'doorLock' in device.snapshot?.washerDryer) {
-      this.serviceDoorLock = this.serviceDoorLock || accessory.addService(LockMechanism, device.name + ' - Door');
+      if (!this.serviceDoorLock) {
+        this.serviceDoorLock = accessory.addService(LockMechanism, device.name + ' - Door');
+        this.serviceDoorLock.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceDoorLock.updateCharacteristic(Characteristic.ConfiguredName, device.name + ' - Door');
+      }
+
       this.serviceDoorLock.getCharacteristic(Characteristic.LockCurrentState)
+        .updateValue(LockCurrentState.UNSECURED)
         .onSet(this.setActive.bind(this))
         .setProps({
           minValue: 0,
           maxValue: 3,
           validValues: [LockCurrentState.UNSECURED, LockCurrentState.SECURED],
-        })
-        .updateValue(LockCurrentState.UNSECURED);
+        });
       this.serviceDoorLock.getCharacteristic(Characteristic.LockTargetState)
         .onSet(this.setActive.bind(this))
         .updateValue(Characteristic.LockTargetState.UNSECURED);
-      this.serviceDoorLock.addLinkedService(this.serviceWasherDryer);
     } else if (this.serviceDoorLock) {
       accessory.removeService(this.serviceDoorLock);
     }
 
-    this.serviceEventFinished = accessory.getService(OccupancySensor);
+    this.serviceEventFinished = accessory.getService('Program Finished');
     if (this.config.washer_trigger as boolean) {
-      this.serviceEventFinished = this.serviceEventFinished || accessory.addService(OccupancySensor, device.name + ' - Program Finished');
+      if (!this.serviceEventFinished) {
+        this.serviceEventFinished = accessory.addService(OccupancySensor, 'Program Finished', 'Program Finished');
+        this.serviceEventFinished.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceEventFinished.updateCharacteristic(Characteristic.ConfiguredName, 'Program Finished');
+      }
+
+      this.serviceEventFinished.setCharacteristic(Characteristic.Name, 'Program Finished');
       // eslint-disable-next-line max-len
       this.serviceEventFinished.updateCharacteristic(Characteristic.OccupancyDetected, Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED);
     } else if (this.serviceEventFinished) {
       accessory.removeService(this.serviceEventFinished);
+    }
+
+    // tub clean coach
+    this.serviceTubCleanMaintenance = accessory.getService('Tub Clean Coach');
+    if (this.config.washer_tub_clean as boolean) {
+      if (!this.serviceTubCleanMaintenance) {
+        this.serviceTubCleanMaintenance = accessory.addService(OccupancySensor, 'Tub Clean Coach', 'Tub Clean Coach');
+        this.serviceTubCleanMaintenance.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        this.serviceTubCleanMaintenance.updateCharacteristic(Characteristic.ConfiguredName, 'Tub Clean Coach');
+      }
+
+      this.serviceTubCleanMaintenance.setCharacteristic(Characteristic.Name, 'Tub Clean Coach');
+      // eslint-disable-next-line max-len
+      this.serviceTubCleanMaintenance.updateCharacteristic(Characteristic.OccupancyDetected, Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED);
+
+      this.serviceTubCleanMaintenance.setCharacteristic(Characteristic.Name, 'Tub Clean Coach');
+      this.serviceTubCleanMaintenance.getCharacteristic(Characteristic.ProgrammableSwitchEvent)
+        .setProps({
+          validValues: [0], // single press
+        });
+    } else if (this.serviceTubCleanMaintenance) {
+      accessory.removeService(this.serviceTubCleanMaintenance);
     }
   }
 
@@ -89,15 +124,13 @@ export default class WasherDryer extends baseDevice {
     return Object.assign({}, {
       washer_trigger: false,
       washer_door_lock: false,
+      washer_tub_clean: false,
     }, super.config);
   }
 
   async setActive(value: CharacteristicValue) {
-    if (!this.Status.isRemoteStartEnable) {
-      return;
-    }
-
-    return;
+    // do nothing, revert back
+    this.updateAccessoryCharacteristic(this.accessory.context.device);
   }
 
   public updateAccessoryCharacteristic(device: Device) {
@@ -131,17 +164,20 @@ export default class WasherDryer extends baseDevice {
       return;
     }
 
+    const {
+      Characteristic: {
+        OccupancyDetected,
+      },
+    } = this.platform;
+
     // when washer state is changed
-    if (this.config.washer_trigger as boolean && this.serviceEventFinished && 'preState' in washerDryer && 'state' in washerDryer) {
-      const {
-        Characteristic: {
-          OccupancyDetected,
-        },
-      } = this.platform;
+    if (this.config.washer_trigger as boolean && this.serviceEventFinished
+      && ('preState' in washerDryer || 'processState' in washerDryer) && 'state' in washerDryer) {
 
       // detect if washer program in done
-      if ((washerDryer.state === 'END' && !NOT_RUNNING_STATUS.includes(washerDryer.preState))
-        || (this.isRunning && !this.Status.isRunning)) {
+      if ((['END', 'COOLDOWN'].includes(washerDryer.state)
+          && !NOT_RUNNING_STATUS.includes(washerDryer.preState || washerDryer.processState))
+          || (this.isRunning && !this.Status.isRunning)) {
         this.serviceEventFinished.updateCharacteristic(OccupancyDetected, OccupancyDetected.OCCUPANCY_DETECTED);
         this.isRunning = false; // marked device as not running
 
@@ -157,11 +193,21 @@ export default class WasherDryer extends baseDevice {
         this.isRunning = true;
       }
     }
+
+    if ('TCLCount' in washerDryer && this.serviceTubCleanMaintenance) {
+      // detect if tub clean coach counter is reached
+      if (this.Status.TCLCount >= 30) {
+        this.serviceTubCleanMaintenance.updateCharacteristic(OccupancyDetected, OccupancyDetected.OCCUPANCY_DETECTED);
+      } else {
+        // reset tub clean coach trigger flag
+        this.serviceTubCleanMaintenance.updateCharacteristic(OccupancyDetected, OccupancyDetected.OCCUPANCY_NOT_DETECTED);
+      }
+    }
   }
 }
 
 export class WasherDryerStatus {
-  constructor(protected data, protected deviceModel: DeviceModel) {
+  constructor(public data, protected deviceModel: DeviceModel) {
   }
 
   public get isPowerOn() {
@@ -181,14 +227,17 @@ export class WasherDryerStatus {
   }
 
   public get isDoorLocked() {
-    return this.data.doorLock === this.deviceModel.lookupMonitorName('doorLock', '@CP_ON_EN_W');
+    const current = this.deviceModel.lookupMonitorName('doorLock', '@CP_ON_EN_W');
+    if (current === null) {
+      return this.data.doorLock === 'DOORLOCK_ON';
+    }
+
+    return this.data.doorLock === current;
   }
 
   public get remainDuration() {
-    const {
-      remainTimeHour = 0,
-      remainTimeMinute = 0,
-    } = this.data;
+    const remainTimeHour = this.data?.remainTimeHour || 0,
+      remainTimeMinute = this.data?.remainTimeMinute || 0;
 
     let remainingDuration = 0;
     if (this.isRunning) {
@@ -196,5 +245,9 @@ export class WasherDryerStatus {
     }
 
     return remainingDuration;
+  }
+
+  public get TCLCount() {
+    return Math.min(parseInt(this.data?.TCLCount || 0), 30);
   }
 }

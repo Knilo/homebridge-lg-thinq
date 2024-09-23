@@ -2,7 +2,7 @@ import {Logger, PlatformConfig} from 'homebridge';
 import {API} from './API';
 import {LGThinQHomebridgePlatform} from '../platform';
 import {Device} from './Device';
-import {PlatformType} from './constants';
+import {DeviceType, PlatformType} from './constants';
 import * as uuid from 'uuid';
 import * as Path from 'path';
 import * as forge from 'node-forge';
@@ -49,7 +49,9 @@ export class ThinQ {
       return [];
     });
 
-    return listDevices.map(dev => new Device(dev));
+    return listDevices.map(device => new Device(device))
+      // skip all device invalid id
+      .filter(device => device.id.match(/^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/));
   }
 
   public async setup(device: Device) {
@@ -102,6 +104,17 @@ export class ThinQ {
       this.log.debug('[' + device.id + '] Device model cache missed.');
       deviceModel = await this.api.httpClient.get(device.data.modelJsonUri).then(res => res.data);
       await this.persist.setItem(device.id, deviceModel);
+    }
+
+    const modelVersion = parseFloat(deviceModel.Info?.version);
+
+    // new washer model
+    if (device.type === DeviceType[DeviceType.WASH_TOWER_2]
+      && modelVersion && modelVersion >= 3
+      && deviceModel.Info?.defaultTargetDeviceRoot
+      && deviceModel[deviceModel.Info.defaultTargetDeviceRoot]
+    ) {
+      deviceModel = deviceModel[deviceModel.Info.defaultTargetDeviceRoot];
     }
 
     return this.deviceModel[device.id] = device.deviceModel = new DeviceModel(deviceModel);
@@ -158,16 +171,18 @@ export class ThinQ {
     });
   }
 
-  public deviceControl(device: string | Device, values: Record<string, any>, command: 'Set' | 'Operation' = 'Set', ctrlKey = 'basicCtrl') {
+  public deviceControl(device: string | Device, values: Record<string, any>, command: 'Set' | 'Operation' = 'Set', ctrlKey = 'basicCtrl', ctrlPath = 'control-sync') {
     const id = device instanceof Device ? device.id : device;
-    return this.api.sendCommandToDevice(id, values, command, ctrlKey).catch(err => {
-      // submitted same value
-      if (err.response?.data?.resultCode === '0103') {
-        return false;
-      }
-
-      this.log.error('Unknown Error: ', err.response);
-    });
+    return this.api.sendCommandToDevice(id, values, command, ctrlKey, ctrlPath)
+      .then(response => {
+        if (response.resultCode === '0000') {
+          this.log.debug('ThinQ Device Received the Command');
+          return true;
+        } else {
+          this.log.debug('ThinQ Device Did Not Received the Command');
+          return false;
+        }
+      });
   }
 
   public async registerMQTTListener(callback: (data: any) => void) {

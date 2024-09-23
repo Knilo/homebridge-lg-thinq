@@ -9,6 +9,7 @@ import {Auth} from './Auth';
 import {WorkId} from './ThinQ';
 import {ManualProcessNeeded, MonitorError, NotConnectedError, TokenExpiredError} from '../errors';
 import crypto from 'crypto';
+import axios from 'axios';
 
 function resolveUrl(from, to) {
   const url = new URL(to, from);
@@ -19,6 +20,7 @@ export class API {
   protected _homes;
   protected _gateway: Gateway | undefined;
   protected session: Session = new Session('', '', 0);
+  protected jsessionId!: string;
   protected auth!: Auth;
   protected userNumber!: string;
 
@@ -38,19 +40,17 @@ export class API {
     this.logger = console;
   }
 
-  async getRequest(uri, headers?: any) {
-    return await this.request('get', uri, headers);
+  async getRequest(uri) {
+    return await this.request('get', uri);
   }
 
-  async postRequest(uri, data, headers?: any) {
-    return await this.request('post', uri, data, headers);
+  async postRequest(uri, data) {
+    return await this.request('post', uri, data);
   }
 
-  protected async request(method, uri: string, data?: any, headers?: any, retry = false) {
-    let requestHeaders = headers || this.defaultHeaders;
-    if (this._gateway?.thinq1_url && uri.startsWith(this._gateway.thinq1_url)) {
-      requestHeaders = headers || this.monitorHeaders;
-    }
+  protected async request(method, uri: string, data?: any, retry = false) {
+    // eslint-disable-next-line max-len
+    const requestHeaders = (this._gateway?.thinq1_url && uri.startsWith(this._gateway.thinq1_url)) ? this.monitorHeaders : this.defaultHeaders;
 
     const url = resolveUrl(this._gateway?.thinq2_url, uri);
 
@@ -60,14 +60,30 @@ export class API {
     }).then(res => res.data).catch(async err => {
       if (err instanceof TokenExpiredError && !retry) {
         return await this.refreshNewToken().then(async () => {
-          return await this.request(method, uri, data, headers, true);
+          return await this.request(method, uri, data, true);
         }).catch((err) => {
           this.logger.debug('refresh new token error: ', err);
           return {};
         });
+      } else if (err instanceof ManualProcessNeeded) {
+        this.logger.warn('Handling new term agreement... If you keep getting this message, ' + err.message);
+        await this.auth.handleNewTerm(this.session.accessToken)
+          .then(() => {
+            this.logger.warn('LG new term agreement is accepted.');
+          })
+          .catch(err => {
+            this.logger.debug(err);
+          });
+
+        if (!retry) {
+          // retry 1 times
+          return await this.request(method, uri, data, true);
+        } else {
+          return {};
+        }
       } else {
-        if (err instanceof ManualProcessNeeded) {
-          this.logger.warn(err.message);
+        if (axios.isAxiosError(err)) {
+          this.logger.debug('request error: ', err.response);
         } else if (!(err instanceof NotConnectedError)) {
           this.logger.debug('request error: ', err);
         }
@@ -88,8 +104,8 @@ export class API {
       monitorHeaders['x-thinq-token'] = this.session?.accessToken;
     }
 
-    if (typeof this.auth?.jsessionId === 'string') {
-      monitorHeaders['x-thinq-jsessionId'] = this.auth?.jsessionId;
+    if (this.jsessionId) {
+      monitorHeaders['x-thinq-jsessionId'] = this.jsessionId;
     }
 
     return monitorHeaders;
@@ -164,8 +180,8 @@ export class API {
     return this._homes;
   }
 
-  public async sendCommandToDevice(device_id: string, values: Record<string, any>, command: 'Set' | 'Operation', ctrlKey = 'basicCtrl') {
-    return await this.postRequest('service/devices/' + device_id + '/control-sync', {
+  public async sendCommandToDevice(device_id: string, values: Record<string, any>, command: 'Set' | 'Operation', ctrlKey = 'basicCtrl', ctrlPath = 'control-sync') {
+    return await this.postRequest('service/devices/' + device_id + '/' + ctrlPath, {
       ctrlKey,
       'command': command,
       ...values,
@@ -227,16 +243,21 @@ export class API {
 
     if (!this.auth) {
       this.auth = new Auth(gateway);
+      this.auth.logger = this.logger;
     }
 
     if (!this.session.hasToken() && this.username && this.password) {
       this.session = await this.auth.login(this.username, this.password);
-      // get new jsessionid
-      await this.auth.getJSessionId(this.session.accessToken);
+      await this.refreshNewToken(this.session);
     }
 
     if (!this.session.hasValidToken() && !!this.session.refreshToken) {
       await this.refreshNewToken(this.session);
+    }
+
+    if (!this.jsessionId) {
+      // get new jsessionid
+      this.jsessionId = await this.auth.getJSessionId(this.session.accessToken);
     }
 
     if (!this.userNumber) {
@@ -252,14 +273,13 @@ export class API {
   public async refreshNewToken(session: Session | null = null) {
     session = session || this.session;
     this.session = await this.auth.refreshNewToken(session);
-    // get new jsessionid
-    await this.auth.getJSessionId(this.session.accessToken);
+
+    this.jsessionId = await this.auth.getJSessionId(this.session.accessToken);
   }
 
   async thinq1PostRequest(endpoint: string, data: any) {
-    const headers = this.monitorHeaders;
     return await this.postRequest(this._gateway?.thinq1_url + endpoint, {
       lgedmRoot: data,
-    }, headers).then(data => data.lgedmRoot);
+    }).then(data => data.lgedmRoot);
   }
 }

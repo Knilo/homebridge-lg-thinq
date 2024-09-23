@@ -18,11 +18,20 @@ export class Device {
   }
 
   public get model() {
-    return this.data.manufacture?.manufactureModel || this.data.modelName || this.data.modemInfo?.modelName;
+    const modelName = this.data.modelName || this.data.modemInfo?.modelName || this.data.manufacture?.manufactureModel;
+    if (/^([A-Z]+)_(\d+)_([A-Z]{2})$/.test(modelName)) {
+      return modelName.slice(0, -3);
+    }
+
+    return modelName;
   }
 
   public get macAddress() {
     return this.data.manufacture?.macAddress;
+  }
+
+  public get salesModel(){
+    return this.data.manufacture?.salesModel;
   }
 
   public get serialNumber() {
