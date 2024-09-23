@@ -176,7 +176,7 @@ export default class Refrigerator extends baseDevice {
       this.serviceExpressMode.updateCharacteristic(Characteristic.On, this.Status.isExpressModeOn);
     }
 
-    if (this.config.ref_shabbat_mode && 'sabbatMode' in device.snapshot?.refState && this.serviceShabbatMode) {
+    if (this.config.ref_shabbat_mode && 'sabbathMode' in device.snapshot?.refState && this.serviceShabbatMode) {
       this.serviceShabbatMode.updateCharacteristic(Characteristic.On, this.Status.isShabbatModeOn);
     }
 
@@ -223,7 +223,7 @@ export default class Refrigerator extends baseDevice {
       dataValue: null,
       dataSetList: {
         refState: {
-          sabbatMode: value as boolean ? On : Off,
+          sabbathMode: value as boolean ? On : Off,
           tempUnit: this.Status.tempUnit,
         },
       },
@@ -391,7 +391,7 @@ export class RefrigeratorStatus {
   }
 
   public get isShabbatModeOn() {
-    return this.data?.sabbathMode === this.deviceModel.lookupMonitorName('sabbatMode', '@CP_ON_EN_W');
+    return this.data?.sabbathMode === this.deviceModel.lookupMonitorName('sabbathMode', '@CP_ON_EN_W');
   }
 
 
